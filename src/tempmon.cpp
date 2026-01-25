@@ -11,7 +11,6 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
-#include <limits>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -27,7 +26,6 @@ constexpr int kIconCanvasSize = 64; // High-DPI friendly size; the system tray w
 constexpr int kMinUpdateMs = 500;   // Avoid reading sensors too frequently.
 constexpr int kMaxUpdateMs = 10000; // Keep the tray feeling responsive.
 constexpr int kMaxDelaySeconds = 30; // Maximum delay for icon display.
-constexpr int kMaxAlertCooldownSeconds = 300;
 
 struct Color {
     double r;
@@ -171,9 +169,6 @@ struct AppSettings {
     ThemeStyle theme_style = ThemeStyle::Dark;
     bool show_unit = true;
     bool show_decimal = false;
-    bool alert_enabled = false;
-    double alert_threshold_c = 85.0;
-    int alert_cooldown_seconds = 60;
     std::string selected_sensor_path; // Empty => auto (highest CPU temp)
 };
 
@@ -219,25 +214,13 @@ public:
 
 private:
     AppIndicator* indicator = nullptr;
-        GtkWidget* menu = nullptr;
-        GtkWidget* settings_window = nullptr;
-        GtkWidget* history_window = nullptr;
-        GtkWidget* history_area = nullptr;
-        guint timer_id = 0;
+    GtkWidget* menu = nullptr;
+    GtkWidget* settings_window = nullptr;
+    guint timer_id = 0;
 
-        std::vector<SensorInfo> sensors;
-        AppSettings settings;
-        std::deque<TempSample> temp_history;
-        Clock::time_point last_alert_time = Clock::now() - std::chrono::seconds(kMaxAlertCooldownSeconds);
-        bool alert_dialog_visible = false;
-
-        struct NetStats {
-            double rx_bytes = 0.0;
-            double tx_bytes = 0.0;
-        };
-
-        NetStats last_net_stats;
-        Clock::time_point last_net_time = Clock::now();
+    std::vector<SensorInfo> sensors;
+    AppSettings settings;
+    std::deque<TempSample> temp_history;
 
     std::string configPath() const {
         return getConfigDir() + "/config.ini";
@@ -288,15 +271,6 @@ private:
         if (values.count("show_decimal")) {
             settings.show_decimal = values["show_decimal"] == "true";
         }
-        if (values.count("alert_enabled")) {
-            settings.alert_enabled = values["alert_enabled"] == "true";
-        }
-        if (values.count("alert_threshold_c")) {
-            settings.alert_threshold_c = std::stod(values["alert_threshold_c"]);
-        }
-        if (values.count("alert_cooldown_seconds")) {
-            settings.alert_cooldown_seconds = std::clamp(std::stoi(values["alert_cooldown_seconds"]), 5, kMaxAlertCooldownSeconds);
-        }
         if (values.count("selected_sensor_path")) {
             settings.selected_sensor_path = values["selected_sensor_path"];
         }
@@ -317,9 +291,6 @@ private:
         file << "theme_style=" << static_cast<int>(settings.theme_style) << "\n";
         file << "show_unit=" << (settings.show_unit ? "true" : "false") << "\n";
         file << "show_decimal=" << (settings.show_decimal ? "true" : "false") << "\n";
-        file << "alert_enabled=" << (settings.alert_enabled ? "true" : "false") << "\n";
-        file << "alert_threshold_c=" << settings.alert_threshold_c << "\n";
-        file << "alert_cooldown_seconds=" << settings.alert_cooldown_seconds << "\n";
         file << "selected_sensor_path=" << settings.selected_sensor_path << "\n";
     }
 
@@ -412,40 +383,6 @@ private:
         if (sensors.empty()) {
             logError("discoverSensors", "No sensors found under /sys/class/hwmon.");
         }
-
-        discoverDiskTemps();
-    }
-
-    void discoverDiskTemps() {
-        const std::string block_path = "/sys/block";
-        if (!fs::exists(block_path)) {
-            logError("discoverDiskTemps", "Block device path missing; disk temps unavailable.", block_path);
-            return;
-        }
-
-        for (const auto& entry : fs::directory_iterator(block_path)) {
-            const std::string device = entry.path().filename().string();
-            const std::string device_hwmon = entry.path().string() + "/device/hwmon";
-            if (!fs::exists(device_hwmon)) {
-                continue;
-            }
-
-            for (const auto& hwmon_entry : fs::directory_iterator(device_hwmon)) {
-                const std::string hwmon_dir = hwmon_entry.path().string();
-                for (int i = 1; i <= 5; i++) {
-                    const std::string temp_input = hwmon_dir + "/temp" + std::to_string(i) + "_input";
-                    if (!fs::exists(temp_input)) {
-                        continue;
-                    }
-
-                    SensorInfo sensor;
-                    sensor.path = temp_input;
-                    sensor.type = "temp";
-                    sensor.name = "Disk " + device + " - Temp" + std::to_string(i);
-                    sensors.push_back(sensor);
-                }
-            }
-        }
     }
 
     // Read current values from sysfs into memory.
@@ -525,6 +462,172 @@ private:
                     max_cpu_temp = std::max(max_cpu_temp, sensor.value);
                 }
             }
+        }
+
+        return max_cpu_temp;
+    }
+
+    // Compute real-time or delayed temperature for the tray icon.
+    double computeDisplayTemperature() {
+        const SensorInfo* selected = findSelectedTempSensor();
+        double current = selected ? selected->value : computeAutoTemperature();
+        if (current <= 0.0) {
+            return current;
+        }
+
+        const auto now = Clock::now();
+        temp_history.push_back({now, current});
+        const auto delay_ms = settings.display_delay_ms;
+
+        if (delay_ms <= 0) {
+            while (temp_history.size() > 5) {
+                temp_history.pop_front();
+            }
+            return current;
+        }
+
+        const auto target_time = now - std::chrono::milliseconds(delay_ms);
+        double delayed_value = current;
+        for (const auto& sample : temp_history) {
+            if (sample.timestamp <= target_time) {
+                delayed_value = sample.value;
+            } else {
+                break;
+            }
+        }
+
+        while (!temp_history.empty() && temp_history.front().timestamp < target_time - std::chrono::seconds(5)) {
+            temp_history.pop_front();
+        }
+
+        return delayed_value;
+    }
+
+    // Convert the temperature to the compact text displayed in the icon.
+    std::string formatIconText(double temperature) const {
+        if (temperature <= 0.0) {
+            return "--";
+        }
+
+        std::ostringstream oss;
+        if (settings.show_decimal) {
+            oss << std::fixed << std::setprecision(1) << temperature;
+        } else {
+            oss << std::fixed << std::setprecision(0) << temperature;
+        }
+
+        if (settings.show_unit) {
+            oss << "°";
+        }
+
+        return oss.str();
+    }
+
+    // Decide colors based on theme selection.
+    void iconColors(Color& background, Color& text, Color& border) const {
+        switch (settings.theme_style) {
+            case ThemeStyle::Light:
+                background = {0.95, 0.95, 0.95, 1.0};
+                text = {0.10, 0.10, 0.10, 1.0};
+                border = {0.75, 0.75, 0.75, 1.0};
+                break;
+            case ThemeStyle::Accent:
+                background = {0.20, 0.30, 0.55, 1.0};
+                text = {0.95, 0.95, 0.95, 1.0};
+                border = {0.10, 0.15, 0.30, 1.0};
+                break;
+            case ThemeStyle::Dark:
+            default:
+                background = {0.20, 0.20, 0.20, 1.0};
+                text = {0.93, 0.93, 0.93, 1.0};
+                border = {0.05, 0.05, 0.05, 1.0};
+                break;
+        }
+    }
+
+    // Rounded rectangle helper for the tray icon.
+    void drawRoundedRect(cairo_t* cr, double x, double y, double width, double height, double radius) {
+        const double degrees = M_PI / 180.0;
+        cairo_new_sub_path(cr);
+        cairo_arc(cr, x + width - radius, y + radius, radius, -90 * degrees, 0 * degrees);
+        cairo_arc(cr, x + width - radius, y + height - radius, radius, 0 * degrees, 90 * degrees);
+        cairo_arc(cr, x + radius, y + height - radius, radius, 90 * degrees, 180 * degrees);
+        cairo_arc(cr, x + radius, y + radius, radius, 180 * degrees, 270 * degrees);
+        cairo_close_path(cr);
+    }
+
+    // Render a full tray icon (background + text) and load it into AppIndicator.
+    void renderIcon(const std::string& text) {
+        cairo_surface_t* surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, kIconCanvasSize, kIconCanvasSize);
+        cairo_t* cr = cairo_create(surface);
+
+        Color background;
+        Color text_color;
+        Color border;
+        iconColors(background, text_color, border);
+
+        cairo_set_source_rgba(cr, 0, 0, 0, 0);
+        cairo_paint(cr);
+
+        const double padding = 6.0;
+        const double width = kIconCanvasSize - padding * 2.0;
+        const double square_height = kIconCanvasSize - padding * 2.0;
+        const double compact_height = square_height * 0.75;
+        const double height = settings.icon_style == IconStyle::Compact ? compact_height : square_height;
+        const double origin_y = (kIconCanvasSize - height) / 2.0;
+
+        // Compact uses a shorter panel, square uses sharp corners, rounded is the default.
+        if (settings.icon_style == IconStyle::Compact) {
+            drawRoundedRect(cr, padding, origin_y, width, height, 10.0);
+        } else if (settings.icon_style == IconStyle::Square) {
+            cairo_rectangle(cr, padding, origin_y, width, height);
+        } else {
+            drawRoundedRect(cr, padding, origin_y, width, height, 10.0);
+        }
+
+        cairo_set_source_rgba(cr, background.r, background.g, background.b, background.a);
+        cairo_fill_preserve(cr);
+        cairo_set_line_width(cr, 2.0);
+        cairo_set_source_rgba(cr, border.r, border.g, border.b, border.a);
+        cairo_stroke(cr);
+
+        cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+        cairo_set_font_size(cr, settings.show_decimal ? 20.0 : 24.0);
+        cairo_text_extents_t extents;
+        cairo_text_extents(cr, text.c_str(), &extents);
+
+        const double text_x = (kIconCanvasSize - extents.width) / 2.0 - extents.x_bearing;
+        const double text_y = (kIconCanvasSize - extents.height) / 2.0 - extents.y_bearing;
+
+        cairo_set_source_rgba(cr, text_color.r, text_color.g, text_color.b, text_color.a);
+        cairo_move_to(cr, text_x, text_y);
+        cairo_show_text(cr, text.c_str());
+
+        cairo_destroy(cr);
+
+        if (writePng(surface, iconPath())) {
+            app_indicator_set_icon_full(indicator, iconPath().c_str(), "TempMon Temperature");
+        }
+
+        cairo_surface_destroy(surface);
+    }
+
+    // Re-render the tray icon with the latest temperature.
+    void updateIndicator() {
+        const double temperature = computeDisplayTemperature();
+        const std::string text = formatIconText(temperature);
+        renderIcon(text);
+    }
+
+    // Build the dropdown menu each tick so values stay current.
+    void buildMenu() {
+        if (!menu) {
+            return;
+        }
+
+        GList* items = gtk_container_get_children(GTK_CONTAINER(menu));
+        for (GList* iter = items; iter != nullptr; iter = g_list_next(iter)) {
+            gtk_widget_destroy(GTK_WIDGET(iter->data));
         }
 
         return max_cpu_temp;
@@ -802,44 +905,9 @@ private:
             gtk_widget_show(item);
         }
 
-        GtkWidget* stats_separator = gtk_separator_menu_item_new();
-        gtk_menu_shell_append(GTK_MENU_SHELL(menu), stats_separator);
-        gtk_widget_show(stats_separator);
-
-        const double cpu_freq = readCpuFrequencyMHz();
-        if (cpu_freq > 0.0) {
-            std::ostringstream freq_text;
-            freq_text << "CPU Freq: " << std::fixed << std::setprecision(1) << cpu_freq << " MHz";
-            GtkWidget* freq_item = gtk_menu_item_new_with_label(freq_text.str().c_str());
-            gtk_widget_set_sensitive(freq_item, FALSE);
-            gtk_menu_shell_append(GTK_MENU_SHELL(menu), freq_item);
-            gtk_widget_show(freq_item);
-        }
-
-        const auto now = Clock::now();
-        const auto totals = readNetworkTotals();
-        const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_net_time).count();
-        if (elapsed > 0) {
-            const double rx_rate = (totals.rx_bytes - last_net_stats.rx_bytes) / (elapsed / 1000.0);
-            const double tx_rate = (totals.tx_bytes - last_net_stats.tx_bytes) / (elapsed / 1000.0);
-            last_net_stats = totals;
-            last_net_time = now;
-
-            std::string net_text = "Net: ↓ " + formatNetworkRate(rx_rate) + " / ↑ " + formatNetworkRate(tx_rate);
-            GtkWidget* net_item = gtk_menu_item_new_with_label(net_text.c_str());
-            gtk_widget_set_sensitive(net_item, FALSE);
-            gtk_menu_shell_append(GTK_MENU_SHELL(menu), net_item);
-            gtk_widget_show(net_item);
-        }
-
         GtkWidget* separator = gtk_separator_menu_item_new();
         gtk_menu_shell_append(GTK_MENU_SHELL(menu), separator);
         gtk_widget_show(separator);
-
-        GtkWidget* history_item = gtk_menu_item_new_with_label("History");
-        g_signal_connect(history_item, "activate", G_CALLBACK(onHistory), this);
-        gtk_menu_shell_append(GTK_MENU_SHELL(menu), history_item);
-        gtk_widget_show(history_item);
 
         GtkWidget* settings_item = gtk_menu_item_new_with_label("Settings");
         g_signal_connect(settings_item, "activate", G_CALLBACK(onSettings), this);
@@ -858,27 +926,6 @@ private:
             g_source_remove(timer_id);
         }
         timer_id = g_timeout_add(settings.update_interval_ms, updateCallback, this);
-    }
-
-    void showHistoryWindow() {
-        if (history_window) {
-            gtk_window_present(GTK_WINDOW(history_window));
-            return;
-        }
-
-        history_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-        gtk_window_set_title(GTK_WINDOW(history_window), "TempMon History");
-        gtk_window_set_default_size(GTK_WINDOW(history_window), 420, 200);
-        gtk_container_set_border_width(GTK_CONTAINER(history_window), 12);
-
-        history_area = gtk_drawing_area_new();
-        gtk_widget_set_size_request(history_area, 400, 160);
-        gtk_container_add(GTK_CONTAINER(history_window), history_area);
-
-        g_signal_connect(history_area, "draw", G_CALLBACK(onHistoryDraw), this);
-        g_signal_connect(history_window, "delete-event", G_CALLBACK(onHistoryClosed), this);
-
-        gtk_widget_show_all(history_window);
     }
 
     // Create the settings window with CoreTemp-like configuration knobs.
@@ -958,26 +1005,6 @@ private:
         gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(decimal_check), settings.show_decimal);
         gtk_box_pack_start(GTK_BOX(vbox), decimal_check, FALSE, FALSE, 0);
 
-        GtkWidget* alert_check = gtk_check_button_new_with_label("Enable temperature alerts");
-        gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(alert_check), settings.alert_enabled);
-        gtk_box_pack_start(GTK_BOX(vbox), alert_check, FALSE, FALSE, 0);
-
-        GtkWidget* alert_threshold_label = gtk_label_new("Alert threshold (°C):");
-        gtk_label_set_xalign(GTK_LABEL(alert_threshold_label), 0.0);
-        gtk_box_pack_start(GTK_BOX(vbox), alert_threshold_label, FALSE, FALSE, 0);
-
-        GtkWidget* alert_threshold_spin = gtk_spin_button_new_with_range(30.0, 120.0, 1.0);
-        gtk_spin_button_set_value(GTK_SPIN_BUTTON(alert_threshold_spin), settings.alert_threshold_c);
-        gtk_box_pack_start(GTK_BOX(vbox), alert_threshold_spin, FALSE, FALSE, 0);
-
-        GtkWidget* alert_cooldown_label = gtk_label_new("Alert cooldown (seconds):");
-        gtk_label_set_xalign(GTK_LABEL(alert_cooldown_label), 0.0);
-        gtk_box_pack_start(GTK_BOX(vbox), alert_cooldown_label, FALSE, FALSE, 0);
-
-        GtkWidget* alert_cooldown_spin = gtk_spin_button_new_with_range(5.0, kMaxAlertCooldownSeconds, 5.0);
-        gtk_spin_button_set_value(GTK_SPIN_BUTTON(alert_cooldown_spin), settings.alert_cooldown_seconds);
-        gtk_box_pack_start(GTK_BOX(vbox), alert_cooldown_spin, FALSE, FALSE, 0);
-
         GtkWidget* button_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
         gtk_box_pack_end(GTK_BOX(vbox), button_box, FALSE, FALSE, 0);
 
@@ -1003,9 +1030,6 @@ private:
         g_object_set_data(G_OBJECT(settings_window), "theme_combo", theme_combo);
         g_object_set_data(G_OBJECT(settings_window), "unit_check", unit_check);
         g_object_set_data(G_OBJECT(settings_window), "decimal_check", decimal_check);
-        g_object_set_data(G_OBJECT(settings_window), "alert_check", alert_check);
-        g_object_set_data(G_OBJECT(settings_window), "alert_threshold_spin", alert_threshold_spin);
-        g_object_set_data(G_OBJECT(settings_window), "alert_cooldown_spin", alert_cooldown_spin);
 
         gtk_widget_show_all(settings_window);
     }
@@ -1023,9 +1047,6 @@ private:
         auto* theme_combo = GTK_COMBO_BOX(g_object_get_data(G_OBJECT(settings_window), "theme_combo"));
         auto* unit_check = GTK_TOGGLE_BUTTON(g_object_get_data(G_OBJECT(settings_window), "unit_check"));
         auto* decimal_check = GTK_TOGGLE_BUTTON(g_object_get_data(G_OBJECT(settings_window), "decimal_check"));
-        auto* alert_check = GTK_TOGGLE_BUTTON(g_object_get_data(G_OBJECT(settings_window), "alert_check"));
-        auto* alert_threshold_spin = GTK_SPIN_BUTTON(g_object_get_data(G_OBJECT(settings_window), "alert_threshold_spin"));
-        auto* alert_cooldown_spin = GTK_SPIN_BUTTON(g_object_get_data(G_OBJECT(settings_window), "alert_cooldown_spin"));
 
         const gchar* sensor_id = gtk_combo_box_get_active_id(sensor_combo);
         if (!sensor_id || std::string(sensor_id) == "auto") {
@@ -1051,9 +1072,6 @@ private:
         }
         settings.show_unit = gtk_toggle_button_get_active(unit_check);
         settings.show_decimal = gtk_toggle_button_get_active(decimal_check);
-        settings.alert_enabled = gtk_toggle_button_get_active(alert_check);
-        settings.alert_threshold_c = gtk_spin_button_get_value(alert_threshold_spin);
-        settings.alert_cooldown_seconds = std::clamp(static_cast<int>(gtk_spin_button_get_value(alert_cooldown_spin)), 5, kMaxAlertCooldownSeconds);
 
         saveSettings();
         restartTimer();
@@ -1067,11 +1085,6 @@ private:
     static void onSettings(GtkMenuItem*, gpointer data) {
         auto* self = static_cast<TempMonitor*>(data);
         self->showSettingsWindow();
-    }
-
-    static void onHistory(GtkMenuItem*, gpointer data) {
-        auto* self = static_cast<TempMonitor*>(data);
-        self->showHistoryWindow();
     }
 
     static void onQuit(GtkMenuItem*, gpointer) {
@@ -1095,80 +1108,11 @@ private:
         return TRUE;
     }
 
-    static gboolean onHistoryClosed(GtkWidget*, GdkEvent*, gpointer data) {
-        auto* self = static_cast<TempMonitor*>(data);
-        if (self->history_window) {
-            gtk_widget_destroy(self->history_window);
-            self->history_window = nullptr;
-            self->history_area = nullptr;
-        }
-        return TRUE;
-    }
-
-    static gboolean onHistoryDraw(GtkWidget*, cairo_t* cr, gpointer data) {
-        auto* self = static_cast<TempMonitor*>(data);
-        const auto& history = self->temp_history;
-        if (history.empty()) {
-            return FALSE;
-        }
-
-        GtkAllocation allocation;
-        gtk_widget_get_allocation(GTK_WIDGET(self->history_area), &allocation);
-        const double width = allocation.width;
-        const double height = allocation.height;
-
-        cairo_set_source_rgb(cr, 0.1, 0.1, 0.1);
-        cairo_paint(cr);
-
-        double min_temp = std::numeric_limits<double>::max();
-        double max_temp = std::numeric_limits<double>::lowest();
-        for (const auto& sample : history) {
-            min_temp = std::min(min_temp, sample.value);
-            max_temp = std::max(max_temp, sample.value);
-        }
-        if (min_temp == max_temp) {
-            max_temp = min_temp + 1.0;
-        }
-
-        const auto start_time = history.front().timestamp;
-        const auto end_time = history.back().timestamp;
-        const auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
-        const double span = std::max(1.0, static_cast<double>(duration));
-
-        cairo_set_source_rgb(cr, 0.2, 0.7, 0.9);
-        cairo_set_line_width(cr, 2.0);
-        bool first = true;
-        for (const auto& sample : history) {
-            const auto offset = std::chrono::duration_cast<std::chrono::milliseconds>(sample.timestamp - start_time).count();
-            const double x = (offset / span) * width;
-            const double normalized = (sample.value - min_temp) / (max_temp - min_temp);
-            const double y = height - (normalized * height);
-            if (first) {
-                cairo_move_to(cr, x, y);
-                first = false;
-            } else {
-                cairo_line_to(cr, x, y);
-            }
-        }
-        cairo_stroke(cr);
-
-        return FALSE;
-    }
-
-    static void onAlertDismissed(GtkDialog*, gint, gpointer data) {
-        auto* self = static_cast<TempMonitor*>(data);
-        self->alert_dialog_visible = false;
-    }
-
     static gboolean updateCallback(gpointer data) {
         auto* monitor = static_cast<TempMonitor*>(data);
         monitor->updateSensorValues();
-        const double temperature = monitor->updateIndicator();
-        monitor->maybeShowAlert(temperature);
+        monitor->updateIndicator();
         monitor->buildMenu();
-        if (monitor->history_area) {
-            gtk_widget_queue_draw(monitor->history_area);
-        }
         return TRUE;
     }
 };

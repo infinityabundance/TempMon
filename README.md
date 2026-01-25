@@ -62,9 +62,6 @@
   - Multiple icon styles (compact, rounded, square)
   - Optional temperature delay for the tray icon
   - Settings window for quick customization
-- 🚨 **Alerts & History**
-  - Configurable temperature alerts
-  - Built-in history graph window
 
 </td>
 </tr>
@@ -168,9 +165,7 @@ The application will:
 2. 📊 Display the highest CPU temperature in the system tray
 3. 📋 Show all sensors in a dropdown menu when clicked
 4. 🔄 Update readings every 2 seconds
-5. ⚙️ Provide a Settings window for icon style, delay, sensor selection, and alerts
-6. 📈 Display CPU frequency + network throughput in the menu
-7. 🧾 Offer a temperature history graph window
+5. ⚙️ Provide a Settings window for icon style, delay, and sensor selection
 
 ### Stopping TempMon
 
@@ -479,7 +474,6 @@ Open **Settings** from the tray menu to configure:
 - Icon style (compact, rounded, square)
 - Theme (dark, light, accent)
 - Decimal precision and degree symbol
-- Temperature alerts (threshold + cooldown)
 
 Settings are stored in `~/.config/tempmon/config.ini`.
 
