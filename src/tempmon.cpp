@@ -629,6 +629,270 @@ private:
         for (GList* iter = items; iter != nullptr; iter = g_list_next(iter)) {
             gtk_widget_destroy(GTK_WIDGET(iter->data));
         }
+
+        return max_cpu_temp;
+    }
+
+    // Compute real-time or delayed temperature for the tray icon.
+    double computeDisplayTemperature() {
+        const SensorInfo* selected = findSelectedTempSensor();
+        double current = selected ? selected->value : computeAutoTemperature();
+        if (current <= 0.0) {
+            return current;
+        }
+
+        const auto now = Clock::now();
+        temp_history.push_back({now, current});
+        const auto delay_ms = settings.display_delay_ms;
+
+        if (delay_ms <= 0) {
+            while (temp_history.size() > 5) {
+                temp_history.pop_front();
+            }
+            return current;
+        }
+
+        const auto target_time = now - std::chrono::milliseconds(delay_ms);
+        double delayed_value = current;
+        for (const auto& sample : temp_history) {
+            if (sample.timestamp <= target_time) {
+                delayed_value = sample.value;
+            } else {
+                break;
+            }
+        }
+
+        while (!temp_history.empty() && temp_history.front().timestamp < target_time - std::chrono::seconds(5)) {
+            temp_history.pop_front();
+        }
+
+        return delayed_value;
+    }
+
+    double readCpuFrequencyMHz() const {
+        const std::string freq_path = "/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq";
+        const std::string freq_str = readFileLine(freq_path);
+        if (freq_str.empty()) {
+            return 0.0;
+        }
+        try {
+            const double khz = std::stod(freq_str);
+            return khz / 1000.0;
+        } catch (const std::exception& ex) {
+            logError("readCpuFrequencyMHz", std::string("Failed to parse CPU frequency: ") + ex.what(), freq_path);
+            return 0.0;
+        }
+    }
+
+    NetStats readNetworkTotals() const {
+        std::ifstream file("/proc/net/dev");
+        if (!file.is_open()) {
+            logError("readNetworkTotals", "Failed to open /proc/net/dev.");
+            return {};
+        }
+
+        NetStats totals;
+        std::string line;
+        while (std::getline(file, line)) {
+            if (line.find(':') == std::string::npos) {
+                continue;
+            }
+            const auto colon = line.find(':');
+            const std::string iface = trim(line.substr(0, colon));
+            if (iface == "lo") {
+                continue;
+            }
+
+            std::istringstream iss(line.substr(colon + 1));
+            double rx_bytes = 0.0;
+            double tx_bytes = 0.0;
+            iss >> rx_bytes;
+            for (int i = 0; i < 7; i++) {
+                double ignore = 0.0;
+                iss >> ignore;
+            }
+            iss >> tx_bytes;
+            totals.rx_bytes += rx_bytes;
+            totals.tx_bytes += tx_bytes;
+        }
+        return totals;
+    }
+
+    std::string formatNetworkRate(double bytes_per_second) const {
+        const double kb = bytes_per_second / 1024.0;
+        const double mb = kb / 1024.0;
+        std::ostringstream oss;
+        oss << std::fixed << std::setprecision(1);
+        if (mb >= 1.0) {
+            oss << mb << " MB/s";
+        } else {
+            oss << kb << " KB/s";
+        }
+        return oss.str();
+    }
+
+    void maybeShowAlert(double temperature) {
+        if (!settings.alert_enabled || temperature <= 0.0) {
+            return;
+        }
+
+        if (temperature < settings.alert_threshold_c) {
+            return;
+        }
+
+        const auto now = Clock::now();
+        const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - last_alert_time).count();
+        if (elapsed < settings.alert_cooldown_seconds) {
+            return;
+        }
+
+        if (alert_dialog_visible) {
+            return;
+        }
+
+        alert_dialog_visible = true;
+        last_alert_time = now;
+
+        std::ostringstream oss;
+        oss << "Temperature alert: " << std::fixed << std::setprecision(1) << temperature << "°C";
+        GtkWidget* dialog = gtk_message_dialog_new(
+            nullptr,
+            GTK_DIALOG_DESTROY_WITH_PARENT,
+            GTK_MESSAGE_WARNING,
+            GTK_BUTTONS_OK,
+            "%s",
+            oss.str().c_str());
+        g_signal_connect(dialog, "response", G_CALLBACK(onAlertDismissed), this);
+        gtk_widget_show(dialog);
+    }
+
+    // Convert the temperature to the compact text displayed in the icon.
+    std::string formatIconText(double temperature) const {
+        if (temperature <= 0.0) {
+            return "--";
+        }
+
+        std::ostringstream oss;
+        if (settings.show_decimal) {
+            oss << std::fixed << std::setprecision(1) << temperature;
+        } else {
+            oss << std::fixed << std::setprecision(0) << temperature;
+        }
+
+        if (settings.show_unit) {
+            oss << "°";
+        }
+
+        return oss.str();
+    }
+
+    // Decide colors based on theme selection.
+    void iconColors(Color& background, Color& text, Color& border) const {
+        switch (settings.theme_style) {
+            case ThemeStyle::Light:
+                background = {0.95, 0.95, 0.95, 1.0};
+                text = {0.10, 0.10, 0.10, 1.0};
+                border = {0.75, 0.75, 0.75, 1.0};
+                break;
+            case ThemeStyle::Accent:
+                background = {0.20, 0.30, 0.55, 1.0};
+                text = {0.95, 0.95, 0.95, 1.0};
+                border = {0.10, 0.15, 0.30, 1.0};
+                break;
+            case ThemeStyle::Dark:
+            default:
+                background = {0.20, 0.20, 0.20, 1.0};
+                text = {0.93, 0.93, 0.93, 1.0};
+                border = {0.05, 0.05, 0.05, 1.0};
+                break;
+        }
+    }
+
+    // Rounded rectangle helper for the tray icon.
+    void drawRoundedRect(cairo_t* cr, double x, double y, double width, double height, double radius) {
+        const double degrees = M_PI / 180.0;
+        cairo_new_sub_path(cr);
+        cairo_arc(cr, x + width - radius, y + radius, radius, -90 * degrees, 0 * degrees);
+        cairo_arc(cr, x + width - radius, y + height - radius, radius, 0 * degrees, 90 * degrees);
+        cairo_arc(cr, x + radius, y + height - radius, radius, 90 * degrees, 180 * degrees);
+        cairo_arc(cr, x + radius, y + radius, radius, 180 * degrees, 270 * degrees);
+        cairo_close_path(cr);
+    }
+
+    // Render a full tray icon (background + text) and load it into AppIndicator.
+    void renderIcon(const std::string& text) {
+        cairo_surface_t* surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, kIconCanvasSize, kIconCanvasSize);
+        cairo_t* cr = cairo_create(surface);
+
+        Color background;
+        Color text_color;
+        Color border;
+        iconColors(background, text_color, border);
+
+        cairo_set_source_rgba(cr, 0, 0, 0, 0);
+        cairo_paint(cr);
+
+        const double padding = 6.0;
+        const double width = kIconCanvasSize - padding * 2.0;
+        const double square_height = kIconCanvasSize - padding * 2.0;
+        const double compact_height = square_height * 0.75;
+        const double height = settings.icon_style == IconStyle::Compact ? compact_height : square_height;
+        const double origin_y = (kIconCanvasSize - height) / 2.0;
+
+        // Compact uses a shorter panel, square uses sharp corners, rounded is the default.
+        if (settings.icon_style == IconStyle::Compact) {
+            drawRoundedRect(cr, padding, origin_y, width, height, 10.0);
+        } else if (settings.icon_style == IconStyle::Square) {
+            cairo_rectangle(cr, padding, origin_y, width, height);
+        } else {
+            drawRoundedRect(cr, padding, origin_y, width, height, 10.0);
+        }
+
+        cairo_set_source_rgba(cr, background.r, background.g, background.b, background.a);
+        cairo_fill_preserve(cr);
+        cairo_set_line_width(cr, 2.0);
+        cairo_set_source_rgba(cr, border.r, border.g, border.b, border.a);
+        cairo_stroke(cr);
+
+        cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+        cairo_set_font_size(cr, settings.show_decimal ? 20.0 : 24.0);
+        cairo_text_extents_t extents;
+        cairo_text_extents(cr, text.c_str(), &extents);
+
+        const double text_x = (kIconCanvasSize - extents.width) / 2.0 - extents.x_bearing;
+        const double text_y = (kIconCanvasSize - extents.height) / 2.0 - extents.y_bearing;
+
+        cairo_set_source_rgba(cr, text_color.r, text_color.g, text_color.b, text_color.a);
+        cairo_move_to(cr, text_x, text_y);
+        cairo_show_text(cr, text.c_str());
+
+        cairo_destroy(cr);
+
+        if (writePng(surface, iconPath())) {
+            app_indicator_set_icon_full(indicator, iconPath().c_str(), "TempMon Temperature");
+        }
+
+        cairo_surface_destroy(surface);
+    }
+
+    // Re-render the tray icon with the latest temperature.
+    double updateIndicator() {
+        const double temperature = computeDisplayTemperature();
+        const std::string text = formatIconText(temperature);
+        renderIcon(text);
+        return temperature;
+    }
+
+    // Build the dropdown menu each tick so values stay current.
+    void buildMenu() {
+        if (!menu) {
+            return;
+        }
+
+        GList* items = gtk_container_get_children(GTK_CONTAINER(menu));
+        for (GList* iter = items; iter != nullptr; iter = g_list_next(iter)) {
+            gtk_widget_destroy(GTK_WIDGET(iter->data));
+        }
         g_list_free(items);
 
         updateSensorValues();

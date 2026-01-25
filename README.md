@@ -31,12 +31,16 @@
   - CPU core temperatures
   - GPU temperatures
   - Motherboard sensors
+  - Disk/NVMe sensors (when exposed via hwmon)
   - Other hardware sensors
 - ⚡ **Power Consumption**
   - CPU package power (watts)
   - GPU power draw
 - 🌀 **Fan Speed Monitoring**
   - All system fans (RPM)
+- 📈 **System Stats**
+  - CPU frequency (MHz)
+  - Network throughput (Rx/Tx)
 
 </td>
 <td width="50%">
