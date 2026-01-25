@@ -7,7 +7,7 @@ GTK_FLAGS = $(shell $(PKGCONFIG) --cflags --libs gtk+-3.0)
 APPINDICATOR_FLAGS = $(shell $(PKGCONFIG) --cflags --libs appindicator3-0.1)
 
 TARGET = tempmon
-SOURCE = tempmon.cpp
+SOURCE = src/tempmon.cpp
 
 all: $(TARGET)
 

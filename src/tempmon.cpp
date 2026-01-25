@@ -571,15 +571,18 @@ private:
 
         const double padding = 6.0;
         const double width = kIconCanvasSize - padding * 2.0;
-        const double height = kIconCanvasSize - padding * 2.0;
+        const double square_height = kIconCanvasSize - padding * 2.0;
+        const double compact_height = square_height * 0.75;
+        const double height = settings.icon_style == IconStyle::Compact ? compact_height : square_height;
+        const double origin_y = (kIconCanvasSize - height) / 2.0;
 
-        // Compact and square styles intentionally share the same geometry.
+        // Compact uses a shorter panel, square uses sharp corners, rounded is the default.
         if (settings.icon_style == IconStyle::Compact) {
-            cairo_rectangle(cr, padding, padding, width, height);
+            drawRoundedRect(cr, padding, origin_y, width, height, 10.0);
         } else if (settings.icon_style == IconStyle::Square) {
-            cairo_rectangle(cr, padding, padding, width, height);
+            cairo_rectangle(cr, padding, origin_y, width, height);
         } else {
-            drawRoundedRect(cr, padding, padding, width, height, 10.0);
+            drawRoundedRect(cr, padding, origin_y, width, height, 10.0);
         }
 
         cairo_set_source_rgba(cr, background.r, background.g, background.b, background.a);
