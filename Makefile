@@ -9,7 +9,11 @@ APPINDICATOR_FLAGS = $(shell $(PKGCONFIG) --cflags --libs appindicator3-0.1)
 TARGET = tempmon
 SOURCE = src/tempmon.cpp
 
-all: $(TARGET)
+all: check-deps $(TARGET)
+
+check-deps:
+	@$(PKGCONFIG) --exists gtk+-3.0 || (echo "Missing gtk+-3.0 pkg-config metadata. Install gtk3 development packages." && exit 1)
+	@$(PKGCONFIG) --exists appindicator3-0.1 || (echo "Missing appindicator3-0.1 pkg-config metadata. Install libappindicator development packages." && exit 1)
 
 $(TARGET): $(SOURCE)
 	$(CXX) $(CXXFLAGS) $(SOURCE) $(GTK_FLAGS) $(APPINDICATOR_FLAGS) -o $(TARGET)
