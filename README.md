@@ -2,6 +2,13 @@
 
 # 🌡️ TempMon
 
+
+<p align="center">
+  <a href="https://github.com/infinityabundance/TempMon">
+    <img src="assets/tempmon.svg" alt="TempMon Logo" width="600">
+  </a>
+</p>
+
 ### Lightweight System Temperature Monitor for Arch Linux
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
