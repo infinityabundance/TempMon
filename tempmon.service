@@ -1,0 +1,14 @@
+[Unit]
+Description=TempMon tray temperature monitor
+Documentation=https://example.com/tempmon
+After=graphical-session.target
+Wants=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/tempmon
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

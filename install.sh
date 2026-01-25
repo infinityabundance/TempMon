@@ -75,6 +75,22 @@ fi
 
 echo
 
+# Ask about systemd user service
+if [ "$INSTALLED_PATH" = "/usr/local/bin/tempmon" ]; then
+    read -p "Enable systemd user service for autostart? (y/n) " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        systemctl --user daemon-reload
+        systemctl --user enable --now tempmon.service
+        echo "✓ Enabled systemd user service (tempmon.service)"
+    fi
+else
+    echo "Note: systemd user service requires an installed binary in /usr/local/bin."
+    echo "      You can re-run the installer and choose to install the binary."
+fi
+
+echo
+
 # Ask about autostart
 read -p "Add to autostart? (y/n) " -n 1 -r
 echo
