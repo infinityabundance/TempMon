@@ -291,7 +291,8 @@ tempmon/
 ├── 📄 .gitignore             # Git ignore rules
 ├── 📄 LICENSE                # MIT License
 ├── 📄 README.md              # This file
-├── 💻 tempmon.cpp            # Main C++ source (~300 lines)
+├──src/                       
+   └── 💻 tempmon.cpp         # Main C++ source (~300 lines)
 ├── 🔨 Makefile               # Build configuration
 ├── 🚀 install.sh             # Automated installer
 ├── 🖥️ tempmon.desktop        # Desktop entry for autostart
