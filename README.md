@@ -14,7 +14,7 @@
 
 *Similar to CoreTemp or iStat Menus, but built specifically for Linux with minimal resource usage.*
 
-[Features](#-features) • [Installation](#-installation) • [Usage](#-usage) • [Troubleshooting](#-troubleshooting) • [Contributing](#-contributing)
+[Features](#-features) • [Installation](#-installation) • [Usage](#-usage) • [Project Structure](#-project-structure) • [GitHub Setup](#-github-setup) • [Troubleshooting](#-troubleshooting)
 
 ---
 
@@ -117,11 +117,8 @@ sudo sensors-detect
 
 ### Method 1: Quick Install Script (Recommended)
 ```bash
-# Download or clone the repository
 git clone https://github.com/yourusername/tempmon.git
 cd tempmon
-
-# Run the automated installer
 chmod +x install.sh
 ./install.sh
 ```
@@ -134,52 +131,17 @@ The script will:
 - ✅ Check for sensor kernel modules
 
 ### Method 2: Manual Installation
-
-<details>
-<summary><b>Click to expand manual installation steps</b></summary>
-
-#### Step 1: Install dependencies
 ```bash
 sudo pacman -S base-devel gtk3 libappindicator-gtk3
-```
-
-#### Step 2: Compile
-```bash
 make
-```
-
-#### Step 3: Install system-wide (optional)
-```bash
 sudo make install
-```
-
-This installs to `/usr/local/bin/tempmon`.
-
-#### Step 4: Run
-```bash
-# If installed system-wide
 tempmon
-
-# Or run from source directory
-./tempmon
 ```
-
-</details>
 
 ### Method 3: Build Arch Package
-
-<details>
-<summary><b>Using PKGBUILD for AUR-style installation</b></summary>
 ```bash
 makepkg -si
 ```
-
-This will:
-- Build the package
-- Install to `/usr/bin/tempmon`
-- Register with pacman for easy removal
-
-</details>
 
 ---
 
@@ -205,13 +167,7 @@ The application will:
 
 ## ⚙️ Autostart Configuration
 
-### 🖥️ Desktop Environments (GNOME, KDE, Xfce, MATE)
-
-#### Automated Setup (via install.sh)
-
-The installation script will prompt you to add TempMon to autostart.
-
-#### Manual Setup
+### For Desktop Environments (GNOME, KDE, Xfce, MATE)
 ```bash
 mkdir -p ~/.config/autostart
 cp tempmon.desktop ~/.config/autostart/
@@ -230,24 +186,21 @@ X-GNOME-Autostart-enabled=true
 EOF
 ```
 
-### 🪟 Window Managers (i3, Sway, bspwm, etc.)
+### For Window Managers (i3, Sway, bspwm)
 
-#### For i3 WM
-
+#### i3 WM
 Add to `~/.config/i3/config`:
 ```bash
 exec --no-startup-id tempmon
 ```
 
-#### For Sway
-
+#### Sway
 Add to `~/.config/sway/config`:
 ```bash
 exec tempmon
 ```
 
-#### For bspwm
-
+#### bspwm
 Add to `~/.config/bspwm/bspwmrc`:
 ```bash
 tempmon &
@@ -259,22 +212,27 @@ tempmon &
 
 <div align="center">
 ```
-┌─────────────────────────────────────────┐
-│   Linux Kernel (hwmon interface)       │
-│   /sys/class/hwmon/hwmon*               │
-└────────────┬────────────────────────────┘
-             │
-             ├─ temp*_input  → Temperature (°C)
-             ├─ power*_input → Power (Watts)
-             └─ fan*_input   → Fan Speed (RPM)
-             │
-             ▼
-┌─────────────────────────────────────────┐
-│          TempMon Application            │
-│  • Auto-discovers sensors               │
-│  • Reads values every 2 seconds         │
-│  • Updates GTK tray indicator           │
-└─────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│          Linux Kernel (hwmon interface)                     │
+│                /sys/class/hwmon/hwmon*                       │
+└──────────────────────────┬──────────────────────────────────┘
+                           │
+        ┌──────────────────┼──────────────────┐
+        │                  │                  │
+        ▼                  ▼                  ▼
+   temp*_input        power*_input       fan*_input
+        │                  │                  │
+   Temperature (°C)    Power (Watts)    Fan Speed (RPM)
+        │                  │                  │
+        └──────────────────┼──────────────────┘
+                           │
+                           ▼
+        ┌──────────────────────────────────────────┐
+        │       TempMon Application                │
+        │  • Auto-discovers sensors                │
+        │  • Reads values every 2 seconds          │
+        │  • Updates GTK tray indicator            │
+        └──────────────────────────────────────────┘
 ```
 
 </div>
@@ -327,6 +285,154 @@ tempmon &
 
 ---
 
+## 📁 Project Structure
+```
+tempmon/
+├── 📄 .gitignore             # Git ignore rules
+├── 📄 LICENSE                # MIT License
+├── 📄 README.md              # This file
+├── 💻 tempmon.cpp            # Main C++ source (~300 lines)
+├── 🔨 Makefile               # Build configuration
+├── 🚀 install.sh             # Automated installer
+├── 🖥️ tempmon.desktop        # Desktop entry for autostart
+├── 📦 PKGBUILD               # Arch package build script
+├── 📚 ENHANCEMENTS.md        # Customization guide
+└── 🖼️ images/                # Screenshots (optional)
+    ├── how-it-works.png
+    ├── tray-icon.png
+    └── dropdown-menu.png
+```
+
+### What Files Do I Need?
+
+**Quick Start (Just Use It):**
+```
+tempmon.cpp + Makefile + install.sh
+```
+
+**Manual Installation:**
+```
+tempmon.cpp + Makefile
+```
+
+**Build Arch Package:**
+```
+tempmon.cpp + Makefile + tempmon.desktop + PKGBUILD
+```
+
+**Total repository size: ~50-300 KB** (extremely lightweight!)
+
+---
+
+## 🐙 GitHub Setup
+
+### Initial Repository Setup
+```bash
+cd tempmon
+git init
+git add .
+git commit -m "Initial commit: TempMon system monitor"
+git remote add origin https://github.com/yourusername/tempmon.git
+git branch -M main
+git push -u origin main
+```
+
+### Repository Configuration
+
+**Topics (Tags):**
+```
+arch-linux, temperature-monitor, system-tray, gtk3, cpp, linux, hardware-monitoring, sensors, lightweight
+```
+
+**Description:**
+```
+Lightweight system tray monitor for CPU/GPU temps, power, and fans
+```
+
+### Creating First Release
+```bash
+git tag -a v1.0.0 -m "Initial release of TempMon"
+git push origin v1.0.0
+```
+
+On GitHub: **Releases** → **Create a new release** → Tag: `v1.0.0`
+
+### .gitignore File
+```gitignore
+# Compiled binary
+tempmon
+
+# Build artifacts
+*.o
+*.so
+*.a
+*.out
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+*.sublime-*
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Backup files
+*.bak
+*.backup
+
+# Package files
+*.tar.gz
+*.tar.xz
+*.pkg.tar.zst
+pkg/
+src/
+
+# Debug files
+*.log
+core
+
+# IDE specific
+.clangd/
+compile_commands.json
+```
+
+### Optional: GitHub Actions CI/CD
+
+Create `.github/workflows/build.yml`:
+```yaml
+name: Build
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential libgtk-3-dev libappindicator3-dev
+    
+    - name: Build
+      run: make
+    
+    - name: Upload binary
+      uses: actions/upload-artifact@v3
+      with:
+        name: tempmon
+        path: tempmon
+```
+
+---
+
 ## 🎨 Customization
 
 ### Changing Update Interval
@@ -359,10 +465,9 @@ See [ENHANCEMENTS.md](ENHANCEMENTS.md) for examples of adding:
 
 ## 🐛 Troubleshooting
 
-<details>
-<summary><b>❌ No sensors detected</b></summary>
+### ❌ No sensors detected
 
-### Solution 1: Load kernel modules
+**Solution 1: Load kernel modules**
 ```bash
 # For Intel CPUs
 sudo modprobe coretemp
@@ -377,7 +482,7 @@ sudo modprobe amdgpu
 echo "coretemp" | sudo tee -a /etc/modules-load.d/sensors.conf
 ```
 
-### Solution 2: Run sensors-detect
+**Solution 2: Run sensors-detect**
 ```bash
 sudo pacman -S lm_sensors
 sudo sensors-detect
@@ -385,7 +490,7 @@ sudo sensors-detect
 sudo reboot
 ```
 
-### Solution 3: Verify sensors exist
+**Solution 3: Verify sensors exist**
 ```bash
 # List available hardware monitors
 ls -la /sys/class/hwmon/
@@ -398,67 +503,43 @@ cat /sys/class/hwmon/hwmon0/name
 cat /sys/class/hwmon/hwmon0/temp1_input
 ```
 
-</details>
+### 🚫 App doesn't appear in system tray
 
-<details>
-<summary><b>🚫 App doesn't appear in system tray</b></summary>
-
-### Check if you have a system tray
-
-#### GNOME
+**GNOME:**
 ```bash
-# Install AppIndicator extension
 sudo pacman -S gnome-shell-extension-appindicator
-
-# Enable it
 gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com
 ```
 
-#### KDE Plasma
-Should work out of the box. Check System Settings → System Tray.
+**KDE Plasma:** Should work out of the box. Check System Settings → System Tray.
 
-#### i3/Sway
-Make sure you're running a status bar that supports tray icons:
-```bash
-# i3bar should show tray icons
-# Or use alternative bars like polybar, waybar
-```
+**i3/Sway:** Make sure you're running a status bar that supports tray icons (i3bar, polybar, waybar).
 
-#### Xfce
-Panel should support indicators by default. Right-click panel → Add Items → Notification Area.
+**Xfce:** Panel should support indicators by default. Right-click panel → Add Items → Notification Area.
 
-</details>
+### ⚠️ Build errors
 
-<details>
-<summary><b>⚠️ Build errors</b></summary>
-
-### Error: `gtk/gtk.h: No such file or directory`
+**Error: `gtk/gtk.h: No such file or directory`**
 ```bash
 sudo pacman -S gtk3 libappindicator-gtk3 pkg-config
 ```
 
-### Error: `undefined reference to 'app_indicator_new'`
+**Error: `undefined reference to 'app_indicator_new'`**
 ```bash
 sudo pacman -S libappindicator-gtk3
 ```
 
-### Check pkg-config
+**Check pkg-config:**
 ```bash
 pkg-config --modversion gtk+-3.0
 pkg-config --modversion appindicator3-0.1
 ```
 
-</details>
+### 🔥 Temperatures seem wrong
 
-<details>
-<summary><b>🔥 Temperatures seem wrong</b></summary>
-
-### Compare with other tools
+**Compare with other tools:**
 ```bash
-# Install comparison tools
 sudo pacman -S lm_sensors
-
-# Check readings
 sensors
 watch -n 1 sensors
 
@@ -466,15 +547,13 @@ watch -n 1 sensors
 nvidia-smi
 ```
 
-### Note about AMD Tctl vs Tdie
+**Note about AMD Tctl vs Tdie:**
 
 AMD reports two temperatures:
 - **Tctl**: Control temperature (with offset)
 - **Tdie**: Die temperature (actual)
 
 TempMon shows both if available.
-
-</details>
 
 ---
 
