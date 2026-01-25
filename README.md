@@ -54,6 +54,10 @@
 - 🔄 **Real-time Updates**
   - 2-second refresh rate
   - Live system tray display
+- ⚙️ **CoreTemp-like Tray Icon**
+  - Multiple icon styles (compact, rounded, square)
+  - Optional temperature delay for the tray icon
+  - Settings window for quick customization
 
 </td>
 </tr>
@@ -157,6 +161,7 @@ The application will:
 2. 📊 Display the highest CPU temperature in the system tray
 3. 📋 Show all sensors in a dropdown menu when clicked
 4. 🔄 Update readings every 2 seconds
+5. ⚙️ Provide a Settings window for icon style, delay, and sensor selection
 
 ### Stopping TempMon
 
@@ -166,6 +171,19 @@ The application will:
 ---
 
 ## ⚙️ Autostart Configuration
+
+### systemd User Service (Recommended)
+```bash
+# Install systemd user unit and enable autostart
+sudo make install
+systemctl --user daemon-reload
+systemctl --user enable --now tempmon.service
+```
+
+Disable it later with:
+```bash
+systemctl --user disable --now tempmon.service
+```
 
 ### For Desktop Environments (GNOME, KDE, Xfce, MATE)
 ```bash
@@ -296,6 +314,7 @@ tempmon/
 ├── 🔨 Makefile               # Build configuration
 ├── 🚀 install.sh             # Automated installer
 ├── 🖥️ tempmon.desktop        # Desktop entry for autostart
+├── 🧰 tempmon.service        # systemd user service (autostart)
 ├── 📦 PKGBUILD               # Arch package build script
 ├── 📚 ENHANCEMENTS.md        # Customization guide
 └── 🖼️ images/                # Screenshots (optional)
@@ -444,9 +463,19 @@ Edit `tempmon.cpp` line ~270:
 timer_id = g_timeout_add(2000, updateCallback, this);
 ```
 
+### Settings Window (Recommended)
+Open **Settings** from the tray menu to configure:
+- Temperature source (auto or a specific sensor)
+- Update interval and icon display delay
+- Icon style (compact, rounded, square)
+- Theme (dark, light, accent)
+- Decimal precision and degree symbol
+
+Settings are stored in `~/.config/tempmon/config.ini`.
+
 ### Changing Tray Display
 
-Edit the `updateIndicatorLabel()` function to show GPU temp instead:
+Edit the `computeAutoTemperature()` function to show GPU temp instead:
 ```cpp
 // Search for GPU temperature instead of CPU
 if (sensor.type == "temp" && sensor.name.find("GPU") != std::string::npos) {
