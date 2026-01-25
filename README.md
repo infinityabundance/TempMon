@@ -31,12 +31,16 @@
   - CPU core temperatures
   - GPU temperatures
   - Motherboard sensors
+  - Disk/NVMe sensors (when exposed via hwmon)
   - Other hardware sensors
 - ⚡ **Power Consumption**
   - CPU package power (watts)
   - GPU power draw
 - 🌀 **Fan Speed Monitoring**
   - All system fans (RPM)
+- 📈 **System Stats**
+  - CPU frequency (MHz)
+  - Network throughput (Rx/Tx)
 
 </td>
 <td width="50%">
@@ -54,6 +58,13 @@
 - 🔄 **Real-time Updates**
   - 2-second refresh rate
   - Live system tray display
+- ⚙️ **CoreTemp-like Tray Icon**
+  - Multiple icon styles (compact, rounded, square)
+  - Optional temperature delay for the tray icon
+  - Settings window for quick customization
+- 🚨 **Alerts & History**
+  - Configurable temperature alerts
+  - Built-in history graph window
 
 </td>
 </tr>
@@ -157,6 +168,9 @@ The application will:
 2. 📊 Display the highest CPU temperature in the system tray
 3. 📋 Show all sensors in a dropdown menu when clicked
 4. 🔄 Update readings every 2 seconds
+5. ⚙️ Provide a Settings window for icon style, delay, sensor selection, and alerts
+6. 📈 Display CPU frequency + network throughput in the menu
+7. 🧾 Offer a temperature history graph window
 
 ### Stopping TempMon
 
@@ -166,6 +180,19 @@ The application will:
 ---
 
 ## ⚙️ Autostart Configuration
+
+### systemd User Service (Recommended)
+```bash
+# Install systemd user unit and enable autostart
+sudo make install
+systemctl --user daemon-reload
+systemctl --user enable --now tempmon.service
+```
+
+Disable it later with:
+```bash
+systemctl --user disable --now tempmon.service
+```
 
 ### For Desktop Environments (GNOME, KDE, Xfce, MATE)
 ```bash
@@ -296,6 +323,7 @@ tempmon/
 ├── 🔨 Makefile               # Build configuration
 ├── 🚀 install.sh             # Automated installer
 ├── 🖥️ tempmon.desktop        # Desktop entry for autostart
+├── 🧰 tempmon.service        # systemd user service (autostart)
 ├── 📦 PKGBUILD               # Arch package build script
 ├── 📚 ENHANCEMENTS.md        # Customization guide
 └── 🖼️ images/                # Screenshots (optional)
@@ -444,9 +472,20 @@ Edit `tempmon.cpp` line ~270:
 timer_id = g_timeout_add(2000, updateCallback, this);
 ```
 
+### Settings Window (Recommended)
+Open **Settings** from the tray menu to configure:
+- Temperature source (auto or a specific sensor)
+- Update interval and icon display delay
+- Icon style (compact, rounded, square)
+- Theme (dark, light, accent)
+- Decimal precision and degree symbol
+- Temperature alerts (threshold + cooldown)
+
+Settings are stored in `~/.config/tempmon/config.ini`.
+
 ### Changing Tray Display
 
-Edit the `updateIndicatorLabel()` function to show GPU temp instead:
+Edit the `computeAutoTemperature()` function to show GPU temp instead:
 ```cpp
 // Search for GPU temperature instead of CPU
 if (sensor.type == "temp" && sensor.name.find("GPU") != std::string::npos) {
