@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=TempMon
+GenericName=Temperature Monitor
+Comment=Monitor system temperatures and power consumption
+Exec=tempmon
+Icon=temperature-symbolic
+Terminal=false
+Categories=System;Monitor;
+StartupNotify=false
+X-GNOME-Autostart-enabled=true
